@@ -9,7 +9,7 @@
 ## Build and verify
 
 ```bash
-git clone https://github.com/yaromacarano/CICD-todoApp.git
+git clone https://github.com/yar-portfolio/CICD-todoApp.git
 cd CICD-todoApp
 git checkout gitlab-ci
 
