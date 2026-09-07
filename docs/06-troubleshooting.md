@@ -216,7 +216,7 @@ If the connection still fails, check that:
 The Pipeline uses:
 
 ```text
-https://github.com/yaromacarano/CICD-todoApp.git
+https://github.com/yar-portfolio/CICD-todoApp.git
 ```
 
 Check that:

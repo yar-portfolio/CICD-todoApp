@@ -40,7 +40,7 @@ pipeline {
 
         stage('Fetch code') {
             steps {
-               git branch: 'main', url: 'https://github.com/yaromacarano/CICD-todoApp.git'
+               git branch: 'main', url: 'https://github.com/yar-portfolio/CICD-todoApp.git'
             }
 
         }

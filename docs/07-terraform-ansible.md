@@ -77,7 +77,7 @@ Run this section on the local computer.
 Clone the repository if necessary:
 
 ```bash
-git clone https://github.com/yaromacarano/CICD-todoApp.git
+git clone https://github.com/yar-portfolio/CICD-todoApp.git
 cd CICD-todoApp
 ```
 
@@ -173,7 +173,7 @@ Run the following commands on the Ansible Controller:
 ```bash
 chmod 600 ~/.ssh/todo-app-key.pem
 
-git clone https://github.com/yaromacarano/CICD-todoApp.git
+git clone https://github.com/yar-portfolio/CICD-todoApp.git
 cd CICD-todoApp/ansible
 
 cp inventory/hosts.ini.example inventory/hosts.ini
@@ -455,7 +455,7 @@ Configure:
 
 - **Definition:** `Pipeline script from SCM`;
 - **SCM:** `Git`;
-- **Repository URL:** `https://github.com/yaromacarano/CICD-todoApp.git`;
+- **Repository URL:** `https://github.com/yar-portfolio/CICD-todoApp.git`;
 - **Branch Specifier:** `*/main`;
 - **Script Path:** `Jenkinsfile`.
 

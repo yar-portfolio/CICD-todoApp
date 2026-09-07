@@ -15,7 +15,7 @@ Docker is optional for this part. The application builds and runs directly with 
 ## Clone the repository
 
 ```bash
-git clone https://github.com/yaromacarano/CICD-todoApp.git
+git clone https://github.com/yar-portfolio/CICD-todoApp.git
 cd CICD-todoApp
 ```
 

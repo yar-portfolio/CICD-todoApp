@@ -144,7 +144,7 @@ Create a Jenkins **Pipeline** job and select **Pipeline script from SCM**.
 Use:
 
 - **SCM:** Git;
-- **Repository URL:** `https://github.com/yaromacarano/CICD-todoApp.git`;
+- **Repository URL:** `https://github.com/yar-portfolio/CICD-todoApp.git`;
 - **Branch Specifier:** `*/main`;
 - **Script Path:** `Jenkinsfile`.
 
@@ -189,7 +189,7 @@ Checks that Java, Maven, Git, Docker, and AWS CLI are available on the Jenkins A
 Clones the `main` branch from:
 
 ```text
-https://github.com/yaromacarano/CICD-todoApp.git
+https://github.com/yar-portfolio/CICD-todoApp.git
 ```
 
 ### 3. UNIT TEST
