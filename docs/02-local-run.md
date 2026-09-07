@@ -11,7 +11,7 @@ Docker is only needed for container testing. Terraform and AWS access are not re
 ## Clone the repository
 
 ```bash
-git clone https://github.com/yaromacarano/CICD-todoApp.git
+git clone https://github.com/yar-portfolio/CICD-todoApp.git
 cd CICD-todoApp
 git checkout github-actions
 ```
