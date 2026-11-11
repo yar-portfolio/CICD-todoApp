@@ -11,7 +11,7 @@
 
     - name: Install common packages, Java, and Docker
       ansible.builtin.apt:
-        name: "{{ common_packages + [jenkins_agent_java_package, 'docker.io'] }}"
+        name: "{{ common_packages + [jenkins_agent_java_package, 'docker.io', 'gnupg', 'software-properties-common'] }}"
         state: present
 
     - name: Start and enable Docker
@@ -98,3 +98,26 @@
       ansible.builtin.command:
         cmd: /tmp/aws/install
         creates: /usr/local/bin/aws
+
+    - name: Download Hashicorp apt GPG key
+      ansible.builtin.get_url:
+        url: "{{ terraform_key_url }}"
+        dest: "{{ dest_key_path }}"
+        mode: "0644"
+
+    - name: Dearmor Hashicorp GPG key
+      ansible.builtin.command:
+        cmd: "gpg --dearmor -o {{ dearmor_key_path }} {{ dest_key_path }}"
+      args:
+        creates: "{{ dearmor_key_path }}"
+
+    - name: Add Hashicorp apt repository
+      ansible.builtin.apt_repository:
+        repo: "{{ hashicorp_repo }}"
+        filename: hashicorp
+        state: present
+
+    - name: Install Terraform
+      ansible.builtin.apt:
+        name: terraform
+        state: present

@@ -7,3 +7,7 @@ jenkins_agent_java_package: openjdk-21-jdk
 maven_version: 3.9.11
 maven_archive_url: "https://archive.apache.org/dist/maven/maven-3/{{ maven_version }}/binaries/apache-maven-{{ maven_version }}-bin.tar.gz"
 aws_cli_archive_url: https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+terraform_key_url: "https://apt.releases.hashicorp.com/gpg"
+dest_key_path: /tmp/hashicorp-archive-keyring.asc
+dearmor_key_path: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+hashicorp_repo: "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com {{ ansible_distribution_release }} main"

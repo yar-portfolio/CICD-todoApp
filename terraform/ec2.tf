@@ -22,6 +22,10 @@ resource "aws_instance" "jenkins_controller" {
   }
 }
 
+data "aws_iam_instance_profile" "jenkins" {
+  name = "JenkinsInfraRole"
+}
+
 resource "aws_instance" "jenkins_agent" {
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.jenkins_agent_instance_type
@@ -29,6 +33,7 @@ resource "aws_instance" "jenkins_agent" {
   subnet_id                   = local.ec2_subnet_id
   vpc_security_group_ids      = [aws_security_group.jenkins_agent.id]
   associate_public_ip_address = true
+  iam_instance_profile = data.aws_iam_instance_profile.jenkins.name
 
   root_block_device {
     volume_type = "gp3"

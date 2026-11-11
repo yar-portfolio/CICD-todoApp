@@ -243,3 +243,5 @@ resource "aws_vpc_security_group_ingress_rule" "ecs_http_from_alb" {
   to_port                      = 8080
   ip_protocol                  = "tcp"
 }
+
+

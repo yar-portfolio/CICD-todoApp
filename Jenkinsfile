@@ -1,7 +1,13 @@
 pipeline {
+
     agent {
         label 'docker-aws-maven'
     }
+
+    triggers {
+      pollSCM('H/3 * * * *')
+    }
+
     tools {
         maven "MAVEN3.9"
         jdk "JDK21"
@@ -10,17 +16,11 @@ pipeline {
 
     environment {
     AWS_REGION = 'us-east-1'
-    ECR_REGISTRY = '551647579168.dkr.ecr.us-east-1.amazonaws.com'
     ECR_REPOSITORY = 'todo-app'
     ECS_CLUSTER = 'newcluster'
     ECS_SERVICE = 'todo-ecs-service'
     ECS_TASK_FAMILY = 'todo-task'
     CONTAINER_NAME = 'todo'
-
-    IMAGE_TAG = "${BUILD_NUMBER}"
-    IMAGE_URI = "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-
-    registryCredential = 'ecr:us-east-1:awscreds'
 }
   stages {
 
@@ -95,34 +95,44 @@ pipeline {
             }
         }
 
-        stage('Build App Image') {
-          steps {
+         stage('Build and Push to ECR') {
+	   steps {
+	     script {
+	       def accountId = sh(
+	         script: 'aws sts get-caller-identity --query Account --output text',
+		 returnStdout: true
+		 ).trim()
 
-            script {
-                dockerImage = docker.build("${IMAGE_URI}", "./")
-                }
-          }
+		 env.ECR_REGISTRY = "${accountId}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
 
-        }
+		 env.IMAGE_URI = "${env.ECR_REGISTRY}/${env.ECR_REPOSITORY}:${env.BUILD_NUMBER}"
+		 }
 
-        stage('Upload App Image') {
-          steps{
-            script {
-              docker.withRegistry("https://${ECR_REGISTRY}", registryCredential ) {
-                dockerImage.push()
-              }
-            }
-          }
-        }
+	     sh '''
+                set -eu
 
-         stage('Deploy to ECS') {
+                # Login to Amazon ECR
+                aws ecr get-login-password \
+                    --region "$AWS_REGION" |
+                docker login \
+                    --username AWS \
+                    --password-stdin "$ECR_REGISTRY"
+
+                # Build Docker image
+                docker build -t "$IMAGE_URI" .
+
+                # Push image to ECR
+                docker push "$IMAGE_URI"
+            '''
+	   }
+	 }
+
+	 stage('Deploy to ECS') {
            steps {
-             withAWS(credentials: 'awscreds', region: "${AWS_REGION}") {
                sh '''
                 chmod +x scripts/deploy-ecs.sh
                 ./scripts/deploy-ecs.sh
                '''
-              }
             }
           }
 

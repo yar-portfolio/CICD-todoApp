@@ -1,0 +1,66 @@
+
+pipeline {
+    agent {
+        label 'docker-aws-maven'
+    }
+
+    triggers {
+        cron('H/3 * * * *')
+    }
+
+    options {
+        disableConcurrentBuilds()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Terraform Drift Check') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform init -input=false -no-color'
+
+                    script {
+                        def exitCode = sh(
+                            script: 'terraform plan -refresh-only -detailed-exitcode -input=false -no-color',
+                            returnStatus: true
+                        )
+
+                        if (exitCode == 0) {
+                            echo 'Infrastructure is up to date.'
+                        } else if (exitCode == 2) {
+                            unstable('Terraform drift detected.')
+                        } else {
+                            error('Terraform plan failed.')
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        unstable {
+            slackSend(
+                channel: '#infra-alerts',
+                message: """⚠️ Terraform drift detected!
+Check Jenkins:
+${env.BUILD_URL}"""
+            )
+        }
+
+        failure {
+            slackSend(
+                channel: '#infra-alerts',
+                message: """❌ Terraform drift check failed!
+${env.BUILD_URL}"""
+            )
+        }
+    }
+}
+
+

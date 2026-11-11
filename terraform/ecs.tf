@@ -30,7 +30,7 @@ resource "aws_ecs_task_definition" "todo" {
   container_definitions = jsonencode([
     {
       name      = "todo"
-      image     = "${aws_ecr_repository.todo.repository_url}:latest"
+      image     = "${aws_ecr_repository.todo.repository_url}:bootstrap"
       cpu       = 0
       essential = true
 
