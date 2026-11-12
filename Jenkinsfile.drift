@@ -25,17 +25,23 @@ pipeline {
                     sh 'terraform init -input=false -no-color'
 
                     script {
-                        def exitCode = sh(
-                            script: 'terraform plan -refresh-only -detailed-exitcode -input=false -no-color',
+                        def code = sh(
+                            script: '''
+                                terraform plan \
+                                    -detailed-exitcode \
+                                    -input=false \
+                                    -no-color \
+                                    > drift-report.txt 2>&1
+                            ''',
                             returnStatus: true
                         )
 
-                        if (exitCode == 0) {
-                            echo 'Infrastructure is up to date.'
-                        } else if (exitCode == 2) {
-                            unstable('Terraform drift detected.')
-                        } else {
-                            error('Terraform plan failed.')
+                        sh 'cat drift-report.txt'
+
+                        if (code == 2) {
+                            unstable('Terraform proposes changes')
+                        } else if (code != 0) {
+                            error('Terraform plan failed')
                         }
                     }
                 }
@@ -44,23 +50,35 @@ pipeline {
     }
 
     post {
-        unstable {
-            slackSend(
-                channel: '#infra-alerts',
-                message: """⚠️ Terraform drift detected!
-Check Jenkins:
-${env.BUILD_URL}"""
+        always {
+            archiveArtifacts(
+                artifacts: 'terraform/drift-report.txt',
+                allowEmptyArchive: true
             )
         }
 
-        failure {
-            slackSend(
-                channel: '#infra-alerts',
-                message: """❌ Terraform drift check failed!
-${env.BUILD_URL}"""
-            )
+        changed {
+            script {
+                def status = currentBuild.currentResult
+                def message
+
+                if (status == 'UNSTABLE') {
+                    message = '⚠️ Terraform detected changes!'
+                } else if (status == 'SUCCESS') {
+                    message = '✅ Infrastructure check is healthy again!'
+                } else {
+                    message = '❌ Terraform drift check failed!'
+                }
+
+                slackSend(
+                    channel: '#infra-alerts',
+                    message: """${message}
+Report: ${env.BUILD_URL}artifact/terraform/drift-report.txt"""
+                )
+            }
         }
     }
 }
+
 
 
