@@ -58,7 +58,8 @@ resource "aws_instance" "ansible_controller" {
   subnet_id                   = local.ec2_subnet_id
   vpc_security_group_ids      = [aws_security_group.ansible_controller.id]
   associate_public_ip_address = true
-  user_data                   = templatefile("${path.module}/templates/ansible-controller-user-data.sh.tftpl", {})
+  user_data = replace(
+  templatefile("${path.module}/templates/ansible-controller-user-data.sh.tftpl", {}), "\r\n", "\n")
   user_data_replace_on_change = true
 
   root_block_device {
