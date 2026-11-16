@@ -1,5 +1,5 @@
 ---
-sonarqube_version: 10.7.0.96327
+sonarqube_version: 26.11.0.134175
 sonarqube_archive_url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonarqube_version }}.zip"
 sonarqube_user: sonarqube
 sonarqube_group: sonarqube
