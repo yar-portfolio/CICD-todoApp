@@ -23,9 +23,16 @@ pipeline {
             steps {
                 dir('terraform') {
                     sh 'terraform init -input=false -no-color'
-
+                    
+                    
+		    withCredentials([
+		        string(
+			    credentialsId: 'terraform-admin-cidr',
+			    variable: 'TF_VAR_admin_cidr'
+			)
+	            ]) {
                     script {
-                        def code = sh(
+		    def code = sh(
                             script: '''
                                 terraform plan \
                                     -detailed-exitcode \
@@ -43,7 +50,7 @@ pipeline {
                         } else if (code != 0) {
                             error('Terraform plan failed')
                         }
-                    }
+                    }}
                 }
             }
         }
