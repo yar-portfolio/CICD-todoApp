@@ -5,6 +5,6 @@ sonarqube_user: sonarqube
 sonarqube_group: sonarqube
 sonarqube_install_directory: /opt/sonarqube-{{ sonarqube_version }}
 sonarqube_home: /opt/sonarqube
-sonarqube_java_package: openjdk-17-jre-headless
-sonarqube_java_home: /usr/lib/jvm/java-17-openjdk-amd64
+sonarqube_java_package: openjdk-21-jre-headless
+sonarqube_java_home: /usr/lib/jvm/java-21-openjdk-amd64
 sonarqube_port: 9000
