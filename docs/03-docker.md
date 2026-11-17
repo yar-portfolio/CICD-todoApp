@@ -70,12 +70,20 @@ docker rm todo-app
 
 ## Jenkins image flow
 
-The Jenkins Pipeline handles the image in two stages:
 
-- **Build App Image** builds the image from the repository `Dockerfile`.
-- **Upload App Image** authenticates to AWS ECR and pushes the image.
+## Jenkins image flow
 
-`Jenkinsfile` uses the ECR repository name `todo-app` and tags each image with the Jenkins `BUILD_NUMBER`. The unique tag connects every ECS task definition revision to the Pipeline run that produced it.
+The Jenkins Pipeline uses the `Build and Push to ECR` stage to build and publish the application image.
+
+The stage performs the following operations:
+
+1. Retrieves the AWS Account ID using AWS STS.
+2. Generates the ECR Registry URL dynamically.
+3. Authenticates to ECR using AWS CLI and the Jenkins Agent IAM Role.
+4. Builds the Docker image from the repository Dockerfile.
+5. Pushes the image to ECR using the Jenkins BUILD_NUMBER as the image tag.
+
+The image tag identifies the build associated with each ECS task definition revision.
 
 ## Expected result
 

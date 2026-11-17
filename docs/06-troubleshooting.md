@@ -135,29 +135,39 @@ Delete the images through the AWS Console:
 4. Select all images and choose **Delete**.
 5. Run `terraform destroy` again.
 
+
 ## Ansible cannot connect to a server
 
-Run Ansible from the Ansible Controller:
+The initial Ansible configuration is automated by `scripts/setup-ansible.sh`.
+
+The script reads EC2 addresses from Terraform outputs, generates the Ansible inventory, and connects to the Ansible Controller using SSH.
+
+The private SSH key remains on the local computer.
+
+Verify that the local SSH agent contains the key:
 
 ```bash
-cd ~/CICD-todoApp/ansible
-ansible all -m ping
+ssh-add -l
 ```
 
-If a server is unreachable, check that:
-
-- the EC2 instance is running;
-- `inventory/hosts.ini` contains the correct private IP addresses;
-- `~/.ssh/todo-app-key.pem` exists on the Ansible Controller;
-- the SSH key has permission `600`;
-- the remote user is `ubuntu`;
-- the Security Group allows SSH from the Ansible Controller.
-
-Set the correct key permission with:
+If necessary, load the key:
 
 ```bash
-chmod 600 ~/.ssh/todo-app-key.pem
+ssh-add ~/.ssh/todo-app-key.pem
 ```
+
+Run the automation again from the repository root:
+
+```bash
+bash scripts/setup-ansible.sh
+```
+
+If the connection still fails, verify:
+- EC2 instances are running.
+- The local SSH key matches the AWS EC2 key pair.
+- SSH Agent Forwarding is available.
+- Security Groups allow the required SSH access.
+- Terraform outputs contain the current IP addresses.
 
 ## Ansible variable is undefined
 
@@ -275,23 +285,26 @@ Make sure that:
 
 Start with the failed Jenkins stage and read its log. Then check the following settings.
 
-### 1. Check Jenkins credentials
 
-Open **Manage Jenkins → Credentials**. The AWS credential must have:
+### 1. Check AWS authentication
 
-- type: `AWS Credentials`;
-- ID: `awscreds`;
-- a valid Access Key ID and Secret Access Key.
+On the Jenkins Agent, run:
 
-### 2. Check the ECR repository
+```bash
+aws sts get-caller-identity
+```
 
-Open **AWS Console → Amazon ECR → Private repositories** and make sure the `todo-app` repository exists in `us-east-1`.
+Verify that the returned identity corresponds to the JenkinsInfraRole assumed role.
+
+Check that no manually configured AWS credentials override the EC2 IAM Role.
+
+### 2. Check ECR repository
+
+Verify that the `todo-app` ECR repository exists in `us-east-1`.
 
 ### 3. Check IAM permissions
 
-Open the IAM user used by Jenkins and check that it has permission to log in to ECR and push images.
-
-After correcting the setting, run the Jenkins Pipeline again.
+Verify that JenkinsInfraRole has the required permissions for ECR authentication, image upload, and ECS deployment.
 
 ## ECS deployment fails
 
@@ -340,6 +353,57 @@ SQLite data is stored inside the container at:
 The current ECS configuration does not use persistent storage for this directory. When ECS replaces the task, the new container starts with an empty database.
 
 Keep `ecs_desired_count = 1`. If several tasks run at the same time, each task has its own separate database.
+
+## Terraform drift check reports unexpected changes
+
+Open the latest Jenkins drift-check build and download the archived `drift-report.txt`.
+
+Check whether:
+- The same admin_cidr is configured locally and through the Jenkins terraform-admin-cidr credential.
+- The Terraform configuration matches the version used during deployment.
+- EC2 user_data contains unintended differences in line endings.
+- Changes were intentionally made by another deployment process.
+
+Terraform plan can report configuration differences even when no manual AWS changes were made.
+
+The drift-check Pipeline must not automatically apply the proposed changes.
+
+## ECS target is in a disabled Availability Zone
+
+Open:
+
+EC2 → Target Groups → todo-target-group → Targets
+
+A target may show the status `Unused` if its Availability Zone is not enabled for the ALB.
+
+Verify that both ALB and ECS Service use:
+
+`local.alb_subnet_ids`
+
+in `terraform/alb.tf` and `terraform/ecs.tf`.
+
+Apply the corrected Terraform configuration
+instead of manually changing ALB subnets.
+
+## SonarQube service fails to start
+
+Check the systemd service:
+
+```bash
+sudo systemctl status sonarqube
+sudo journalctl -u sonarqube -n 100 --no-pager
+```
+
+Inspect application logs:
+
+```bash
+sudo tail -n 50 /opt/sonarqube/logs/sonar.log
+sudo tail -n 50 /opt/sonarqube/logs/es.log
+```
+
+Check Java compatibility, available memory, kernel settings, file limits, and service ownership.
+
+Fix the underlying issue before restarting the service.
 
 ## Screenshot safety check
 

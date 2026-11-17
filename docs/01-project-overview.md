@@ -32,20 +32,22 @@ Jenkins coordinates the build and deployment process. Resource-intensive work ru
 
 ## End-to-end workflow
 
-1. Terraform provisions the AWS infrastructure.
-2. Ansible configures the Jenkins Controller, Jenkins Agent, and SonarQube server.
-3. The Jenkins Pipeline job loads the repository `Jenkinsfile`.
-4. The Controller assigns the build to the Jenkins Agent.
-5. The Agent verifies its tools and checks out the source code.
-6. Maven compiles and tests the application.
-7. Checkstyle produces the Java style report.
-8. SonarQube analyzes the code and returns the Quality Gate result.
-9. Maven packages `target/todolist-app-1.0.0.jar`.
-10. Docker builds the application image.
-11. Jenkins pushes the image to the `todo-app` ECR repository.
-12. Jenkins registers a new revision of the `todo-task` task definition.
-13. Jenkins updates `todo-ecs-service` and waits for the service to stabilize.
-14. The Application Load Balancer routes HTTP traffic to the healthy ECS task.
+1. Bootstrap Terraform provisions the S3 remote state bucket and Jenkins Agent IAM Role.
+2. Main Terraform provisions the AWS infrastructure.
+3. The local setup-ansible.sh script reads Terraform outputs, generates inventory, and launches Ansible on the Ansible Controller.
+4. Ansible configures Jenkins Controller, Jenkins Agent, and SonarQube.
+5. The Jenkins Pipeline job loads the repository `Jenkinsfile`.
+6. The Controller assigns the build to the Jenkins Agent.
+7. The Agent verifies its tools and checks out the source code.
+8. Maven compiles and tests the application.
+9. Checkstyle produces the Java style report.
+10. SonarQube analyzes the code and returns the Quality Gate result.
+11. Maven packages `target/todolist-app-1.0.0.jar`.
+12. Docker builds the application image.
+13. Jenkins pushes the image to the `todo-app` ECR repository.
+14. Jenkins registers a new revision of the `todo-task` task definition.
+15. Jenkins updates `todo-ecs-service` and waits for the service to stabilize.
+16. The Application Load Balancer routes HTTP traffic to the healthy ECS task.
 
 ## Main components
 
@@ -82,7 +84,7 @@ Terraform creates:
 - the ECS Task Execution IAM role;
 - the `/ecs/todo-task` CloudWatch log group.
 
-The current network design uses the default VPC, public subnets, and public IPv4 addresses for the EC2 instances. Terraform state is stored locally.
+The current network design uses the default VPC, public subnets, and public IPv4 addresses for the EC2 instances. The main Terraform configuration stores its state in an S3 remote backend with encryption and native S3 state locking. The bootstrap configuration maintains a separate local state.
 
 ## Jenkins execution model
 
@@ -90,7 +92,9 @@ The Pipeline targets the `docker-aws-maven` label and runs on the dedicated Jenk
 
 The Jenkins Controller handles orchestration. Maven builds, Docker operations, SonarQube scans, and AWS deployment commands run on the Agent.
 
-The current `Jenkinsfile` does not define an automatic trigger, so the Pipeline starts manually with **Build Now**.
+The main Jenkins Pipeline uses SCM polling to detect changes in the GitHub main branch.
+
+A separate Terraform drift-check Pipeline runs every three minutes and reports its status to Slack.
 
 ## DevOps-related repository files
 
@@ -102,22 +106,27 @@ The current `Jenkinsfile` does not define an automatic trigger, so the Pipeline 
 - `ansible/` — contains Ansible configuration, inventory, variables, and playbooks.
 - `aws/task-definition-template.json` — provides the ECS task definition template used during deployment.
 - `scripts/deploy-ecs.sh` — registers a new task revision, updates the ECS service, and waits for stability.
+- `scripts/setup-ansible.sh` — creates ansible inventory and configures Jenkins controller, agent and Sonarqube server.
 - `data/.gitkeep` — preserves the local data directory in Git.
 - `docs/` — contains setup, architecture, and troubleshooting documentation.
 - `docs/screenshots/` — contains screenshots from documented releases and deployments.
+- `bootstrap/` — contains the Terraform S3 and IAM Role configuration.
+- `Jenkinsfile.drift` — defines the infrastructure drift checking pipeline and Slack notification.
 
 ## Design choices and trade-offs
 
 - Jenkins, SonarQube, and the application currently use HTTP rather than HTTPS.
-- Terraform state is local rather than stored in a remote backend.
 - Jenkins credentials and SonarQube integration are configured after provisioning.
 - The environment uses the default VPC and public subnets.
 - SQLite runs inside the application container without persistent ECS storage.
 - Replacing the ECS task also replaces the Todo database.
 - The ECS service runs one task because each additional task would have an independent SQLite database.
-- GitHub webhook-based Pipeline triggers are not enabled.
-
-These choices keep the environment compact and make each part of the delivery path easy to inspect. The structure can be extended with private subnets, HTTPS, a remote Terraform backend, persistent storage, and automatic webhook triggers without changing the core workflow.
+- The main Terraform state is stored in S3 with encryption and state locking.
+- Bootstrap uses a separate local Terraform state.
+- Jenkins uses SCM polling rather than public GitHub webhooks.
+- Jenkins Agent authenticates to AWS using its EC2 IAM Role.
+- Terraform uses the same two selected default VPC subnets for ALB and ECS tasks.
+- Jenkins and SonarQube integrations still require manual configuration after Ansible provisioning.
 
 ## Technical coverage
 

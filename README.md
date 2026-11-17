@@ -67,6 +67,9 @@ This keeps build tools and Docker operations away from the Jenkins Controller.
 - `Dockerfile` — Docker image definition.
 - `.dockerignore` — limits the Docker build context to the Dockerfile and application JAR.
 - `Jenkinsfile` — Jenkins CI/CD pipeline.
+- `Jenkinsfile.drift` — scheduled Terraform configuration checks and Slack notifications.
+- `bootstrap/` — provisions the Terraform S3 state bucket and Jenkins Agent IAM Role.
+- `scripts/setup-ansible.sh` — generates Ansible inventory from Terraform outputs and automates the configuration of EC2 hosts.
 - `pom.xml` — Maven project configuration.
 - `aws/` — AWS deployment templates.
 - `aws/task-definition-template.json` — ECS task definition template used by Jenkins.
@@ -141,10 +144,18 @@ The complete deployment sequence is documented in `docs/07-terraform-ansible.md`
 
 In short:
 
-1. Run Terraform locally to create the AWS resources.
-2. Use the Ansible Controller to configure the EC2 servers.
-3. Finish the Jenkins, SonarQube, and credentials configuration.
-4. Start the Jenkins Pipeline manually with **Build Now**.
+1. Run Terraform in `bootstrap/` to create the S3 state bucket and Jenkins Agent IAM Role.
+2. Configure `terraform/backend.tf` with the S3 bucket name created by bootstrap.
+3. Run Terraform in `terraform/` to provision the AWS infrastructure.
+4. Load the EC2 SSH private key into the local SSH agent.
+5. Run `bash scripts/setup-ansible.sh` to configure Jenkins Controller, Jenkins Agent, and SonarQube.
+6. Complete the manual Jenkins, SonarQube, and Slack integration settings.
+7. Create and run the main Jenkins Pipeline.
+8. Configure the separate Terraform drift-check job.
+
+The main Jenkins Pipeline uses SCM polling to check the GitHub `main` branch approximately every three minutes. No inbound GitHub webhook is required.
+
+The drift-check Pipeline runs Terraform plan every three minutes and sends Slack notifications when its build status changes.
 
 The current version does not configure an automatic GitHub webhook trigger.
 
@@ -176,6 +187,10 @@ Keep `ecs_desired_count = 1` with this design. Running multiple tasks would crea
 
 ## Security
 
-Secrets are not stored in this repository. AWS access keys, the EC2 private key, SonarQube tokens, and passwords must be managed outside Git through Jenkins Credentials, AWS IAM, and local protected files.
+The Jenkins Agent uses an EC2 IAM Role to obtain temporary AWS credentials. Permanent AWS access keys are not required by the Jenkins Pipeline.
+
+SSH private keys, SonarQube tokens, Slack tokens, and Jenkins credentials must be managed outside Git.
+
+The main Terraform state is stored in an encrypted S3 backend with state locking. Bootstrap maintains its own separate local Terraform state.
 
 Before committing screenshots, make sure that they do not expose access keys, tokens, passwords, private keys, or other sensitive information.

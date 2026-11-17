@@ -33,7 +33,7 @@
     }
   ],
   "family": "todo-task",
-  "executionRoleArn": "arn:aws:iam::551647579168:role/ecsTaskExecutionRole",
+  "executionRoleArn": "executionRoleArn": "arn:aws:iam::AWS_ACCOUNT_ID_PLACEHOLDER:role/ecsTaskExecutionRole",
   "networkMode": "awsvpc",
   "volumes": [],
   "placementConstraints": [],

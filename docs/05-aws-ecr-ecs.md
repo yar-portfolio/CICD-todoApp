@@ -16,9 +16,9 @@ Terraform owns the AWS infrastructure, while Jenkins owns application delivery. 
 
 1. Jenkins builds the Spring Boot JAR.
 2. Jenkins builds a Docker image tagged with the Jenkins build number.
-3. Jenkins authenticates to ECR with the credential `awscreds`.
+3. Jenkins authenticates to ECR using AWS CLI and temporary credentials provided by the Jenkins Agent IAM Role.
 4. Jenkins pushes the image to the `todo-app` repository.
-5. Jenkins replaces `IMAGE_URI_PLACEHOLDER` in `aws/task-definition-template.json`.
+5. Jenkins dynamically replaces `IMAGE_URI_PLACEHOLDER` and `AWS_ACCOUNT_ID_PLACEHOLDER` in the ECS task definition template.
 6. Jenkins registers a new `todo-task` task definition revision.
 7. Jenkins updates `todo-ecs-service` to use the new revision.
 8. Jenkins waits until the ECS service becomes stable.
@@ -46,12 +46,14 @@ Terraform also creates the four EC2 instances and their Security Groups. They ar
 |---|---|
 | AWS region | `us-east-1` |
 | Repository | `todo-app` |
-| Registry | `551647579168.dkr.ecr.us-east-1.amazonaws.com` |
+| Registry | `<AWS_ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com` |
 | Image tag | Jenkins `BUILD_NUMBER` |
 
 The ECR repository uses mutable tags. Image scanning on push is disabled in the current Terraform configuration.
 
 `force_delete` is `false`, so Terraform cannot delete a non-empty repository during `terraform destroy`.
+
+The ECR Registry URL is generated dynamically by Jenkins using aws sts get-caller-identity.
 
 ## ECS configuration
 
@@ -71,6 +73,20 @@ The ECR repository uses mutable tags. Image scanning on push is disabled in the 
 The ECS task uses `awsvpc` networking and receives a public IP in the current network design.
 
 The ECS Security Group accepts port `8080` only from the Application Load Balancer Security Group.
+
+### ECS networking and Availability Zones
+
+The Application Load Balancer and ECS Service use the same subnet list:
+
+`local.alb_subnet_ids`
+
+Terraform selects two subnets from the default VPC.
+
+Both `terraform/alb.tf` and `terraform/ecs.tf` reference this shared list.
+
+This ensures that ECS tasks are scheduled only in subnets enabled for the Application Load Balancer.
+
+The ALB target group uses HTTP port 8080 and performs health checks on `/`, accepting HTTP response codes 200-399.
 
 ## ECS task definition template
 
@@ -97,10 +113,28 @@ The generated file is ignored by Git.
 The template uses this execution role:
 
 ```text
-arn:aws:iam::551647579168:role/ecsTaskExecutionRole
+arn:aws:iam::AWS_ACCOUNT_ID_PLACEHOLDER:role/ecsTaskExecutionRole
+```
+The ECS task definition template uses two placeholders:
+
+- `IMAGE_URI_PLACEHOLDER` — the Docker image URI.
+- `AWS_ACCOUNT_ID_PLACEHOLDER` — the AWS Account ID.
+
+During deployment, `scripts/deploy-ecs.sh` retrieves the AWS Account ID automatically using:
+
+```bash
+aws sts get-caller-identity --query Account --output text
 ```
 
-When deploying into another AWS account, replace the account ID in the template.
+The script replaces both placeholders and generates `task-definition.json` before registering a new ECS task definition revision.
+
+The execution role ARN is generated dynamically:
+
+`arn:aws:iam::<AWS_ACCOUNT_ID>:role/ecsTaskExecutionRole`
+
+No manual AWS Account ID replacement is required.
+
+The `ecsTaskExecutionRole` must exist in the target AWS account.
 
 ## Terraform and Jenkins task definition revisions
 
@@ -116,81 +150,34 @@ lifecycle {
 
 This prevents a later `terraform apply` from moving the ECS service back to the original Terraform-created revision.
 
-## Jenkins AWS credentials
+### Initial ECS deployment
 
-Use a dedicated IAM user such as:
+The initial Terraform task definition references the image tag `bootstrap`.
 
-```text
-jenkins-cicd
-```
+This image is not automatically created in ECR.
 
-Create an access key for that user and store it in Jenkins as an **AWS Credentials** credential with this exact ID:
+Because the ECS service starts with `ecs_desired_count = 1`, the first task may fail until Jenkins publishes the first application image.
 
-```text
-awscreds
-```
+Jenkins then registers a new task definition revision using its versioned image and updates the ECS service.
 
-Do not store the access key or secret key in this repository.
 
-## Jenkins IAM policy
+## Jenkins Agent IAM Role
 
-Attach a least-privilege policy based on the following example:
+Bootstrap creates an IAM Role named `JenkinsInfraRole` and attaches it to the Jenkins Agent EC2 through an Instance Profile.
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "EcrAuthorization",
-      "Effect": "Allow",
-      "Action": "ecr:GetAuthorizationToken",
-      "Resource": "*"
-    },
-    {
-      "Sid": "EcrImagePush",
-      "Effect": "Allow",
-      "Action": [
-        "ecr:BatchCheckLayerAvailability",
-        "ecr:InitiateLayerUpload",
-        "ecr:UploadLayerPart",
-        "ecr:CompleteLayerUpload",
-        "ecr:PutImage"
-      ],
-      "Resource": "arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/todo-app"
-    },
-    {
-      "Sid": "EcsDeployment",
-      "Effect": "Allow",
-      "Action": [
-        "ecs:RegisterTaskDefinition",
-        "ecs:DescribeTaskDefinition",
-        "ecs:UpdateService",
-        "ecs:DescribeServices"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "PassEcsExecutionRole",
-      "Effect": "Allow",
-      "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
-      "Condition": {
-        "StringEquals": {
-          "iam:PassedToService": "ecs-tasks.amazonaws.com"
-        }
-      }
-    }
-  ]
-}
-```
+The current role includes:
 
-Replace `ACCOUNT_ID` with the value returned locally from the `terraform/` directory:
+- PowerUserAccess for AWS resource operations.
+- IAMReadOnlyAccess for inspecting IAM resources.
+- TerraformStateAccess for the remote S3 state and lock file.
+- A restricted iam:PassRole permission for
+  ecsTaskExecutionRole.
 
-```bash
-terraform output -raw aws_account_id
-```
+The Jenkins Agent automatically receives temporary AWS credentials from the EC2 metadata service.
 
-The `ecs:DescribeServices` permission is required by `aws ecs wait services-stable` in the deployment script.
+No IAM User access keys are required.
+
+PowerUserAccess is intentionally broad for this learning project. A production environment should use more restrictive permissions.
 
 ## ECS Task Execution Role
 
@@ -202,7 +189,7 @@ service-role/AmazonECSTaskExecutionRolePolicy
 
 ECS uses this role to pull the image from ECR and send container logs to CloudWatch.
 
-The Jenkins IAM user does not use this role directly. Jenkins only needs permission to pass it to ECS through `iam:PassRole`.
+Jenkins uses its EC2 IAM Role to register task definitions and receives permission to pass ecsTaskExecutionRole through iam:PassRole.
 
 ## Deployment verification
 
@@ -239,8 +226,8 @@ With multiple ECS tasks, each task would have its own independent SQLite databas
 
 ## Security notes
 
-- AWS access keys are stored only in Jenkins Credentials.
+- Jenkins uses temporary AWS credentials through the Jenkins Agent EC2 IAM Role.
 - The EC2 private key must not be committed to Git.
 - The ALB currently uses HTTP on port `80`; HTTPS is not configured.
 - ECS tasks receive public IPs in the current network design, while inbound application traffic remains restricted to the ALB Security Group.
-- A hardened deployment can extend this design with private subnets, HTTPS, stronger IAM separation, persistent storage, and a remote Terraform backend.
+- A hardened deployment can extend this design with private subnets, HTTPS, stronger IAM separation, persistent storage.

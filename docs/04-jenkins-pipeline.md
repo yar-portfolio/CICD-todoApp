@@ -33,19 +33,10 @@ Install these plugins on the Jenkins Controller:
 - **Git** — checks out the repository.
 - **SSH Build Agents** — connects the Jenkins Controller to the Agent through SSH.
 - **SonarQube Scanner for Jenkins** — configures the scanner and Quality Gate integration.
-- **Docker Pipeline** — provides `docker.build` and `docker.withRegistry`.
-- **Amazon ECR** — authenticates Docker with AWS ECR.
-- **Pipeline: AWS Steps** — provides the `withAWS` Pipeline step.
+- **Credentials Binding** — exposes credentials securely to Pipeline steps.
+- **Slack Notification** — sends infrastructure check notifications to Slack.
 
 Required dependency plugins are installed automatically by Jenkins.
-
-The following plugins are not required by the current `Jenkinsfile`:
-
-- Pipeline: GitHub Groovy Libraries;
-- CloudBees Docker Build and Publish;
-- Build Timestamp;
-- Workspace Cleanup;
-- Amazon Web Services SDK :: All as a separately selected plugin.
 
 ## Jenkins tools
 
@@ -99,21 +90,30 @@ Create a **Secret text** credential:
 - **Secret:** token generated in SonarQube;
 - **ID:** `sonar-token`.
 
-### AWS credentials
+### AWS authentication
 
-Create an **AWS Credentials** credential:
+The Jenkins Agent EC2 instance uses the `JenkinsInfraRole` IAM Role created by bootstrap.
 
-- **ID:** `awscreds`;
-- **Access Key ID:** access key for the Jenkins IAM user;
-- **Secret Access Key:** secret key for the Jenkins IAM user.
+AWS CLI automatically obtains temporary credentials through the EC2 Instance Metadata Service.
 
-The ID must be exactly `awscreds` because `Jenkinsfile` uses it directly and through:
+No permanent AWS access keys are required in Jenkins Credentials.
 
-```groovy
-registryCredential = 'ecr:us-east-1:awscreds'
+Verify the IAM identity on the Jenkins Agent:
+
+```bash
+aws sts get-caller-identity
 ```
 
-The required IAM policy is documented in `docs/05-aws-ecr-ecs.md`.
+The returned ARN should reference `assumed-role/JenkinsInfraRole`.
+
+### Terraform admin CIDR
+
+Create a Jenkins `Secret text` credential:
+
+- ID: `terraform-admin-cidr`
+- Secret: the administrator's IPv4 CIDR, matching the value used during Terraform infrastructure provisioning.
+
+`Jenkinsfile.drift` binds this credential to `TF_VAR_admin_cidr`, allowing Terraform to use the same configuration as the initial deployment.
 
 ## SonarQube integration
 
@@ -150,15 +150,22 @@ Use:
 
 The repository is public, so Git credentials are not required for checkout.
 
+
 ## Pipeline trigger
 
-The current `Jenkinsfile` does not contain a `triggers` block.
+The main Jenkins Pipeline uses SCM polling:
 
-The Terraform Security Group allows access to Jenkins port `8080` only from the administrator CIDR and internal project Security Groups. GitHub cannot currently reach the Jenkins webhook endpoint.
+```groovy
+triggers {
+    pollSCM('H/3 * * * *')
+}
+```
 
-Start the Pipeline manually with **Build Now**.
+Jenkins checks the GitHub main branch approximately every three minutes and starts a new build when repository changes are detected.
 
-To enable builds on every push, add a Jenkins trigger and expose the webhook endpoint through an appropriately secured public route. Until then, **Build Now** is the intended entry point.
+A public GitHub webhook is not required.
+
+After creating the Pipeline job, run it manually once to initialize the job and register its trigger.
 
 ## Environment values
 
@@ -167,14 +174,17 @@ The `environment` block in `Jenkinsfile` uses:
 | Variable | Value |
 |---|---|
 | `AWS_REGION` | `us-east-1` |
-| `ECR_REGISTRY` | `551647579168.dkr.ecr.us-east-1.amazonaws.com` |
 | `ECR_REPOSITORY` | `todo-app` |
 | `ECS_CLUSTER` | `newcluster` |
 | `ECS_SERVICE` | `todo-ecs-service` |
 | `ECS_TASK_FAMILY` | `todo-task` |
 | `CONTAINER_NAME` | `todo` |
 
-`IMAGE_TAG` uses the Jenkins build number. `IMAGE_URI` is built from the registry, repository, and build number.
+AWS_REGION, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE, ECS_TASK_FAMILY, and CONTAINER_NAME are defined in the Jenkinsfile environment block.
+
+ECR_REGISTRY is generated dynamically using the AWS Account ID returned by AWS STS.
+
+IMAGE_URI is generated from the registry, repository name, and Jenkins BUILD_NUMBER.
 
 If Terraform is deployed in another AWS account, update `ECR_REGISTRY` in `Jenkinsfile` and `executionRoleArn` in `aws/task-definition-template.json`.
 
@@ -244,29 +254,22 @@ target/todolist-app-1.0.0.jar
 
 Jenkins archives the JAR after a successful build.
 
-### 8. Build App Image
 
-Builds this Docker image:
+### 8. Build and Push to ECR
 
-```text
-551647579168.dkr.ecr.us-east-1.amazonaws.com/todo-app:BUILD_NUMBER
-```
+Jenkins retrieves the AWS Account ID and constructs the ECR Registry URL dynamically.
 
-### 9. Upload App Image
+It authenticates using AWS CLI and the Jenkins Agent IAM Role, builds the Docker image, and pushes it with the Jenkins BUILD_NUMBER tag.
 
-Uses the Amazon ECR plugin and the `awscreds` credential to authenticate and push the image.
+### 9. Deploy to ECS
 
-### 10. Deploy to ECS
+Jenkins executes `scripts/deploy-ecs.sh`.
 
-Runs `scripts/deploy-ecs.sh` inside `withAWS`.
 
-The script:
+The deployment script automatically retrieves the
+AWS Account ID using AWS STS.
 
-1. replaces `IMAGE_URI_PLACEHOLDER` in `aws/task-definition-template.json`;
-2. creates the temporary `task-definition.json` file;
-3. registers a new `todo-task` revision;
-4. updates `todo-ecs-service`;
-5. waits until the ECS service becomes stable.
+It replaces `IMAGE_URI_PLACEHOLDER` and `AWS_ACCOUNT_ID_PLACEHOLDER` in the task definition template, registers a new ECS task definition revision, updates the ECS service, and waits until the deployment becomes stable.
 
 ## Expected outcome
 
@@ -280,3 +283,45 @@ After a successful run:
 - a new task definition revision is registered;
 - the ECS service is updated and becomes stable;
 - the application can be opened through the Application Load Balancer URL.
+
+
+## Infrastructure Drift Monitoring
+
+The repository includes a separate Pipeline defined in `Jenkinsfile.drift`.
+
+The Pipeline runs every three minutes using:
+
+```groovy
+triggers {
+    cron('H/3 * * * *')
+}
+```
+
+It initializes Terraform and executes:
+
+```bash
+terraform plan -detailed-exitcode \
+  -input=false -no-color
+```
+
+Terraform plan exit codes:
+
+- 0 — no changes proposed.
+- 1 — Terraform execution failed.
+- 2 — Terraform proposes infrastructure changes.
+
+The Pipeline archives the complete output as `terraform/drift-report.txt`.
+
+The Jenkins `terraform-admin-cidr` credential provides the value of `TF_VAR_admin_cidr`.
+
+Build results:
+- SUCCESS — no changes proposed.
+- UNSTABLE — changes proposed.
+- FAILURE — Terraform execution error.
+
+The Slack Notification plugin sends messages to `#infra-alerts` when the Jenkins build status changes.
+
+The Pipeline does not run terraform apply.
+
+Note: This check detects differences between Terraform configuration, state, and current AWS resources. It is not a complete audit of every manual change made in the AWS account.
+

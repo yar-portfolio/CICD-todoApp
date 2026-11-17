@@ -31,30 +31,35 @@ The current setup uses:
 - public subnets;
 - public IPv4 addresses for EC2 instances;
 - HTTP instead of HTTPS;
-- a local Terraform state;
+- an S3 remote backend for the main Terraform state, with a separate local state for bootstrap
 - manually configured Jenkins credentials;
 - SQLite inside the application container.
 
-The deployment remains intentionally compact: it does not add a custom VPC, private subnets, an S3 backend, RDS, HTTPS, Route 53, or Auto Scaling. These services can be introduced independently as the environment is hardened or scaled.
+The environment uses a default VPC, public subnets, HTTP endpoints, and manually configured Jenkins integrations.
+
+The main infrastructure state is stored in S3 with encryption and native state locking.
+
+Bootstrap is managed separately and keeps its own local Terraform state.
 
 ## Where to run commands
 
 | Location | Commands |
 |---|---|
-| Local computer, inside `CICD-todoApp/terraform/` | `terraform init`, `plan`, `apply`, `output`, `destroy`, and SSH/SCP commands |
-| Ansible Controller, inside `~/CICD-todoApp/ansible/` | `ansible`, `ansible-playbook`, and inventory editing |
-| Jenkins web interface | Credentials, Agent node, tools, SonarQube, and Pipeline settings |
+| Local computer | Bootstrap Terraform, main Terraform, scripts/setup-ansible.sh |
+| Ansible Controller | Ansible commands launched automatically by the setup script |
+| Jenkins web interface | Agent, tools, SonarQube, credentials, Slack and Pipeline jobs |
 
-Do not run `terraform output` on the Ansible Controller. The Terraform state remains on the local computer.
+Do not run `terraform output` on the Ansible Controller.
 
 ## Prerequisites
 
 Install on the local computer:
 
-- Terraform 1.7 or newer;
+- Terraform 1.10 or newer;
 - AWS CLI;
 - Git;
-- an SSH client.
+- an SSH client;
+- SSH Agent
 
 Prepare AWS access:
 
@@ -70,7 +75,45 @@ The Terraform variable `key_name` must contain the EC2 key pair name, not the `.
 
 If AWS already contains resources with the same names, Terraform cannot create duplicates. Remove resources that are no longer needed or import the existing resources into the current Terraform state. Import examples are available in `docs/06-troubleshooting.md`.
 
-## 1. Create the infrastructure
+
+## 1. Bootstrap the infrastructure
+
+Before provisioning the main infrastructure, initialize the bootstrap Terraform configuration.
+
+From the repository root:
+
+```bash
+terraform -chdir=bootstrap init
+terraform -chdir=bootstrap plan
+terraform -chdir=bootstrap apply
+```
+
+Bootstrap creates:
+- An S3 bucket for Terraform state.
+- S3 bucket versioning and encryption.
+- S3 public access restrictions.
+- JenkinsInfraRole and its Instance Profile.
+- IAM permissions for Jenkins and Terraform.
+
+Retrieve the generated S3 bucket name:
+
+```bash
+terraform -chdir=bootstrap output -raw bucket_name
+```
+
+Open `terraform/backend.tf` and set the bucket value to the generated S3 bucket name.
+
+The main Terraform backend uses:
+
+- Key: `todoapp/terraform.tfstate`
+- Region: `us-east-1`
+- Encryption: enabled
+- S3 state locking: enabled
+
+Bootstrap keeps its own local Terraform state.
+Back up this state securely and do not commit it to Git.
+
+## 2. Create the main infrastructure
 
 Run this section on the local computer.
 
@@ -141,107 +184,48 @@ The ECR repository is empty after the first `terraform apply`. The ECS task cann
 
 AWS resources can generate charges while they exist. Use the cleanup section at the end of this guide when the environment is no longer needed.
 
-## 2. Prepare the Ansible Controller
 
-Run the first commands in this section on the local computer from `CICD-todoApp/terraform/`.
+## 3. Configure EC2 instances using Ansible
 
-Wait for cloud-init on the Ansible Controller:
+The project includes an automated Ansible setup script located at:
 
-```bash
-ssh -i ~/.ssh/todo-app-key.pem \
-  ubuntu@$(terraform output -raw ansible_controller_public_ip) \
-  'cloud-init status --wait'
-```
+`scripts/setup-ansible.sh`
 
-Copy the EC2 private key to the Ansible Controller:
+Run this script from the local computer after the main Terraform infrastructure has been created.
+
+Load the EC2 SSH private key into the local SSH agent:
 
 ```bash
-scp -i ~/.ssh/todo-app-key.pem \
-  ~/.ssh/todo-app-key.pem \
-  ubuntu@$(terraform output -raw ansible_controller_public_ip):/home/ubuntu/.ssh/todo-app-key.pem
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/todo-app-key.pem
 ```
 
-Connect to the Ansible Controller:
+From the repository root, execute:
 
 ```bash
-ssh -i ~/.ssh/todo-app-key.pem \
-  ubuntu@$(terraform output -raw ansible_controller_public_ip)
+bash scripts/setup-ansible.sh
 ```
 
-Run the following commands on the Ansible Controller:
+The script automatically:
 
-```bash
-chmod 600 ~/.ssh/todo-app-key.pem
+1. Reads the EC2 IP addresses from Terraform outputs.
+2. Generates a temporary Ansible inventory.
+3. Connects to the Ansible Controller over SSH.
+4. Waits for cloud-init to finish.
+5. Clones or updates the GitHub repository.
+6. Copies the generated inventory to the Ansible Controller.
+7. Executes `ansible-inventory` and `ansible-playbook`.
 
-git clone https://github.com/yar-portfolio/CICD-todoApp.git
-cd CICD-todoApp/ansible
+Ansible configures:
+- Jenkins Controller.
+- Jenkins Agent.
+- SonarQube server.
 
-cp inventory/hosts.ini.example inventory/hosts.ini
-```
+The SSH private key stays on the local computer. SSH Agent Forwarding is used for authentication.
 
-Do not commit the private key or the real inventory. The repository ignores `.pem` files and `inventory/hosts.ini`.
+No manual IP address replacement or repository cloning is required on the Ansible Controller.
 
-## 3. Fill the Ansible inventory
-
-Open a local terminal and run these commands inside `CICD-todoApp/terraform/`:
-
-```bash
-terraform output -raw jenkins_controller_private_ip
-terraform output -raw jenkins_agent_private_ip
-terraform output -raw sonarqube_private_ip
-```
-
-Copy the three returned private IP addresses.
-
-Return to the Ansible Controller and open the inventory:
-
-```bash
-cd ~/CICD-todoApp/ansible
-nano inventory/hosts.ini
-```
-
-Replace the example addresses:
-
-```ini
-[jenkins_controller]
-jenkins-controller ansible_host=JENKINS_CONTROLLER_PRIVATE_IP
-
-[jenkins_agents]
-jenkins-agent ansible_host=JENKINS_AGENT_PRIVATE_IP
-
-[sonarqube]
-sonarqube-server ansible_host=SONARQUBE_PRIVATE_IP
-
-[all:vars]
-ansible_user=ubuntu
-ansible_ssh_private_key_file=~/.ssh/todo-app-key.pem
-ansible_python_interpreter=/usr/bin/python3
-```
-
-Use private IP addresses because the managed EC2 instances accept SSH from the Ansible Controller Security Group inside the VPC.
-
-Check connectivity:
-
-```bash
-cd ~/CICD-todoApp/ansible
-ansible all -m ping
-```
-
-Run all playbooks:
-
-```bash
-ansible-playbook playbooks/site.yml
-```
-
-Run individual playbooks only when necessary:
-
-```bash
-ansible-playbook playbooks/setup-jenkins-controller.yml
-ansible-playbook playbooks/setup-jenkins-agent.yml
-ansible-playbook playbooks/setup-sonarqube.yml
-```
-
-Always run these commands from `~/CICD-todoApp/ansible/`. This ensures that Ansible loads `ansible.cfg`, the inventory, and `group_vars`.
+Run the script again if the EC2 instances are recreated.
 
 ## 4. Finish the Jenkins and SonarQube setup
 
@@ -269,13 +253,12 @@ Use the password to complete the Jenkins setup wizard and create the administrat
 
 Install the plugins listed in `docs/04-jenkins-pipeline.md`:
 
-- Pipeline;
-- Git;
-- SSH Build Agents;
-- SonarQube Scanner for Jenkins;
-- Docker Pipeline;
-- Amazon ECR;
-- Pipeline: AWS Steps.
+- Pipeline
+- Git
+- SSH Build Agents
+- SonarQube Scanner for Jenkins
+- Credentials Binding
+- Slack Notification
 
 ### 4.3 Prepare SSH access to the Jenkins Agent
 
@@ -401,22 +384,20 @@ The trailing `/` is required.
 
 SonarQube sends the Quality Gate result to the Jenkins Controller because the Controller manages the Pipeline. The Agent only runs the scanner.
 
-### 4.9 Add AWS credentials to Jenkins
 
-Create a dedicated IAM user such as `jenkins-cicd` and attach the policy documented in `docs/05-aws-ecr-ecs.md`.
+### 4.9 Verify Jenkins IAM Role
 
-Create an access key for that IAM user.
+The Jenkins Agent receives AWS permissions from the JenkinsInfraRole IAM Role created by bootstrap.
 
-In Jenkins, open **Manage Jenkins → Credentials → System → Global credentials** and create:
+Permanent AWS credentials are not required in Jenkins.
 
-- **Kind:** `AWS Credentials`;
-- **ID:** `awscreds`;
-- **Access Key ID:** the IAM access key;
-- **Secret Access Key:** the IAM secret key.
+Verify authentication on the Jenkins Agent:
 
-The ID must be exactly `awscreds` because it is referenced by `Jenkinsfile`.
+```bash
+aws sts get-caller-identity
+```
 
-Do not add AWS access keys to Git, Terraform variables, Ansible variables, shell scripts, or screenshots.
+The identity should reference the JenkinsInfraRole assumed role.
 
 ## 5. Check account-specific Pipeline values
 
@@ -429,13 +410,15 @@ terraform output -raw ecs_cluster_name
 terraform output -raw ecs_service_name
 terraform output -raw ecs_task_execution_role_arn
 ```
+The Jenkins Pipeline automatically retrieves the AWS Account ID using AWS STS.
 
-The current repository contains AWS account ID `551647579168` in:
+The ECR Registry URL is generated dynamically.
 
-- `ECR_REGISTRY` inside `Jenkinsfile`;
-- `executionRoleArn` inside `aws/task-definition-template.json`.
+During ECS deployment, `scripts/deploy-ecs.sh` also retrieves the AWS Account ID and inserts it into the ECS task definition execution role ARN.
 
-If Terraform is deployed in another AWS account, update both files before running the Pipeline.
+No manual AWS Account ID configuration is required in the Jenkinsfile or ECS task definition template.
+
+The `ecsTaskExecutionRole` must exist in the target AWS account, and JenkinsInfraRole must have permission to pass it using `iam:PassRole`.
 
 The current resource names must remain:
 
@@ -461,9 +444,11 @@ Configure:
 
 Save the job.
 
-The current `Jenkinsfile` does not contain a `triggers` block. The Terraform Security Group also does not allow GitHub to reach Jenkins port `8080`.
+The Jenkinsfile uses SCM polling to check the GitHub main branch approximately every three minutes.
 
-Start the Pipeline manually with **Build Now**.
+After creating the Pipeline job, run it manually once to initialize the job and register the trigger.
+
+Jenkins can then automatically detect new commits without requiring a public GitHub webhook.
 
 Jenkins will:
 
@@ -477,6 +462,50 @@ Jenkins will:
 8. wait until the ECS service becomes stable.
 
 Terraform ignores later changes to the ECS service task definition revision. A future `terraform apply` therefore does not roll the service back to the original revision.
+
+
+## Configure Terraform drift monitoring
+
+Create a second Jenkins Pipeline job:
+
+- Job name: `terraform-drift-check`
+- Definition: Pipeline script from SCM
+- SCM: Git
+- Repository: the same GitHub repository
+- Branch: `*/main`
+- Script Path: `Jenkinsfile.drift`
+
+The job checks Terraform configuration every three minutes.
+
+### Terraform admin CIDR credential
+
+Open Jenkins Credentials and create a new Secret text credential:
+
+- ID: `terraform-admin-cidr`
+- Secret: the same IPv4 CIDR used during the initial Terraform deployment.
+
+The Pipeline maps this credential to TF_VAR_admin_cidr.
+
+### Slack configuration
+
+Create or select the Slack channel:
+
+`#infra-alerts`
+
+Configure the Slack Notification plugin using a Slack App bot token stored in Jenkins Credentials.
+
+Configure the Slack workspace, credentials, default channel, and bot-user settings.
+
+Test the connection before running the Pipeline.
+
+The drift-check Pipeline:
+
+- Runs terraform plan.
+- Stores the report as drift-report.txt.
+- Marks proposed changes as UNSTABLE.
+- Marks Terraform execution errors as FAILURE.
+- Sends Slack notifications when build status changes.
+- Does not automatically run terraform apply.
 
 ## 7. Open the application
 
@@ -529,3 +558,19 @@ terraform destroy
 Confirm the destruction only after reviewing the plan.
 
 After `terraform destroy`, check the AWS Console for manually created resources or resources from a different Terraform state. They are not removed by the current state and may continue to generate charges.
+
+### Bootstrap cleanup
+
+The main Terraform configuration does not manage the bootstrap S3 bucket or JenkinsInfraRole.
+
+Bootstrap resources are managed by a separate Terraform state.
+
+Do not remove the S3 backend while the main infrastructure still depends on it.
+
+Before cleaning up bootstrap:
+- Destroy the main infrastructure.
+- Back up the S3 Terraform state.
+- Check that no Terraform runner still needs access to the bucket.
+- Review the bootstrap destroy plan carefully.
+
+The S3 bucket may need its objects and versions removed before it can be deleted.
