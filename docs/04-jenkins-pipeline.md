@@ -180,13 +180,11 @@ The `environment` block in `Jenkinsfile` uses:
 | `ECS_TASK_FAMILY` | `todo-task` |
 | `CONTAINER_NAME` | `todo` |
 
-AWS_REGION, ECR_REPOSITORY, ECS_CLUSTER, ECS_SERVICE, ECS_TASK_FAMILY, and CONTAINER_NAME are defined in the Jenkinsfile environment block.
+`AWS_REGION`, `ECR_REPOSITORY`, `ECS_CLUSTER`, `ECS_SERVICE`, `ECS_TASK_FAMILY`, and `CONTAINER_NAME` are defined in the Jenkinsfile environment block.
 
-ECR_REGISTRY is generated dynamically using the AWS Account ID returned by AWS STS.
+`ECR_REGISTRY` is generated dynamically using the AWS Account ID returned by AWS STS.
 
-IMAGE_URI is generated from the registry, repository name, and Jenkins BUILD_NUMBER.
-
-If Terraform is deployed in another AWS account, update `ECR_REGISTRY` in `Jenkinsfile` and `executionRoleArn` in `aws/task-definition-template.json`.
+`IMAGE_URI` is generated from the registry, repository name, and Jenkins `BUILD_NUMBER`.
 
 ## Pipeline stages
 

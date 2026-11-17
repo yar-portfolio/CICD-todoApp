@@ -127,7 +127,7 @@ mvn clean package -DskipTests
 Build the Docker image:
 
 ```bash
-docker build -t todo-app:v1.0 .
+docker build -t todo-app:local .
 ```
 
 Run the container:

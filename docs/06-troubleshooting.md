@@ -67,7 +67,7 @@ ls -l target/todolist-app-1.0.0.jar
 Try to build the image manually:
 
 ```bash
-docker build -t todo-app:v1.0 .
+docker build -t todo-app:local .
 ```
 
 If Jenkins reports a Docker permission error, make sure the `jenkins` user belongs to the `docker` group. Restart the Jenkins Agent after changing the group membership.

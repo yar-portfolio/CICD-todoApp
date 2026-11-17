@@ -31,7 +31,7 @@ The current setup uses:
 - public subnets;
 - public IPv4 addresses for EC2 instances;
 - HTTP instead of HTTPS;
-- an S3 remote backend for the main Terraform state, with a separate local state for bootstrap
+- an S3 remote backend for the main Terraform state, with a separate local state for bootstrap;
 - manually configured Jenkins credentials;
 - SQLite inside the application container.
 
@@ -484,7 +484,7 @@ Open Jenkins Credentials and create a new Secret text credential:
 - ID: `terraform-admin-cidr`
 - Secret: the same IPv4 CIDR used during the initial Terraform deployment.
 
-The Pipeline maps this credential to TF_VAR_admin_cidr.
+The Pipeline maps this credential to `TF_VAR_admin_cidr`.
 
 ### Slack configuration
 
