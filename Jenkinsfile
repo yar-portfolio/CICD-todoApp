@@ -130,9 +130,8 @@ pipeline {
 	 stage('Deploy to ECS') {
            steps {
                sh '''
-                chmod +x scripts/deploy-ecs.sh
-                ./scripts/deploy-ecs.sh
-               '''
+               bash scripts/deploy-ecs.sh
+	       '''
             }
           }
 
