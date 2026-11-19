@@ -30,7 +30,7 @@ resource "aws_ecs_task_definition" "todo" {
   container_definitions = jsonencode([
     {
       name      = "todo"
-      image     = "${aws_ecr_repository.todo.repository_url}:latest"
+      image     = "${aws_ecr_repository.todo.repository_url}:bootstrap"
       cpu       = 0
       essential = true
 
@@ -72,7 +72,7 @@ resource "aws_ecs_service" "todo" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = local.default_subnet_ids
+    subnets          = local.alb_subnet_ids
     security_groups  = [aws_security_group.ecs.id]
     assign_public_ip = true
   }
