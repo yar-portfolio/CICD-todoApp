@@ -1,0 +1,89 @@
+name: GitHub Actions Terraform Drift Check
+
+on:
+  schedule:
+    - cron: '7/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: github-actions-terraform-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Check Terraform infrastructure
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub Actions branch
+        uses: actions/checkout@v6
+        with:
+          ref: github-actions
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform Init and Plan
+        id: plan
+        working-directory: terraform
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_IN_AUTOMATION: "true"
+        shell: bash
+        run: |
+          set +e
+
+          terraform init \
+            -input=false \
+            -no-color \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            > drift-report.txt 2>&1
+
+          CODE=$?
+
+          if [ "$CODE" -eq 0 ]; then
+            terraform plan \
+              -detailed-exitcode \
+              -input=false \
+              -no-color \
+              >> drift-report.txt 2>&1
+
+            CODE=$?
+          fi
+
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          cat drift-report.txt
+
+      - name: Upload Terraform report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: terraform-drift-${{ github.run_number }}
+          path: terraform/drift-report.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Notify Slack on status change
+        if: always() && steps.plan.outputs.exit_code != ''
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          PLAN_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: bash scripts/notify-drift.sh
+
+      - name: Mark detected drift or errors
+        if: steps.plan.outputs.exit_code != '0'
+        run: exit 1
