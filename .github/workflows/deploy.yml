@@ -41,7 +41,7 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml \
-
+            -Dsonar.qualitygate.wait=true
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
@@ -72,23 +72,6 @@ jobs:
           name: todolist-app-1.0.0
           path: target
 
-
-      - name: Debug OIDC claims
-        shell: bash
-        run: |
-          curl -fsS \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-          | python3 -c '
-          import sys, json, base64
-          token = json.load(sys.stdin)["value"]
-          part = token.split(".")[1]
-          claims = json.loads(
-              base64.urlsafe_b64decode(part + "=" * (-len(part) % 4))
-          )
-          print("sub:", claims.get("sub"))
-          print("aud:", claims.get("aud"))
-          '  
 
       - name: Configure AWS Credentials
         if: github.ref == 'refs/heads/github-actions' && github.event_name != 'pull_request'

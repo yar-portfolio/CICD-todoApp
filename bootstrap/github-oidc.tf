@@ -28,8 +28,8 @@ data "aws_iam_policy_document" "github_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:yar-portfolio/CICD-todoApp:environment:production",
-        "repo:yar-portfolio/CICD-todoApp:ref:refs/heads/main"
+        "repo:yar-portfolio@216569382/CICD-todoApp@1232912344:environment:production",
+        "repo:yar-portfolio@216569382/CICD-todoApp@1232912344:ref:refs/heads/main"
       ]
     }
   }
