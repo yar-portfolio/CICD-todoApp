@@ -84,7 +84,9 @@ resource "aws_iam_role_policy" "github_actions_permissions" {
           "ecr:InitiateLayerUpload",
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload",
-          "ecr:PutImage"
+          "ecr:PutImage",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
         ]
         Resource = "arn:aws:ecr:us-east-1:${data.aws_caller_identity.current.account_id}:repository/todo-app"
       },
