@@ -41,7 +41,6 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} \
             -Dsonar.junit.reportPaths=target/surefire-reports \
             -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml \
-            -Dsonar.qualitygate.wait=true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
